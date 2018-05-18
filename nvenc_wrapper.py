@@ -3,53 +3,85 @@ import os
 import argparse
 from subprocess import check_call, CalledProcessError
 
-# -- Globals -- #
-__OUTPUT_ROOT = r"D:\BD\conv"
-__NVENC_PATH = r"C:\tools\nvenc\NVEncC64.exe"
-__NVENV_OPTS_CQP = [
-    '--cqp', '22',
-]
-__NVENC_OPTS_COMMON = [
-    '--chapter-copy', 
-    '--sub-copy',
-    '--audio-stream', '5.1,:stereo',
-    '--audio-codec', 'aac',
-    '--audio-bitrate', '224',
-]
-__NVENC_OPTS_1080 = [
-    '-c', 'hevc',
-    '--output-res', '1920x1080',
-]
-__NVENC_OPTS_720 = [
-    '-c', 'h264',
-    '--output-res', '1280x720',
-]
+
+# -- Classes -- #
+class RenderJob():
+    def __init__(self, input_file,
+        output_root=r"D:\BD\conv",
+        encoder_path=r"C:\tools\nvenc\NVEncC64.exe",
+        cqp='22',
+        output_res='1920x1080',
+        codec='hevc'
+     ):
+        self.output_root = output_root
+        self.output_path = None
+        self.input_path = input_file
+        self.output_res = output_res
+        self.encoder_path = encoder_path
+        self.codec = codec
+        self.cqp = cqp
+        self.encoder_options = [
+                '-c', self.codec,
+                '--output-res', self.output_res,
+                '--cqp', self.cqp,
+                '--chapter-copy', 
+                '--sub-copy',
+                '--audio-stream', '5.1,:stereo',
+                '--audio-codec', 'aac',
+                '--audio-bitrate', '224',
+        ]
+
+    def render(self):
+        if not self.output_path:
+            self.calc_output_path()
+
+        cmd = [self.encoder_path] + self.encoder_options + [
+            '-i', self.input_path,
+            '-o', self.output_path
+        ]
+        
+        print('\n\n--- Encoding', self.input_path, '-->', self.output_path)
+        
+        if os.path.exists(self.output_path) and not args.overwrite:
+            print('  - The file already exists, skipping render')
+            return
+            
+        try:
+            check_call(cmd)
+        except CalledProcessError as e:
+            print('Failed to encode', self.input_path)
+            print('Command used: {{', cmd, '}}', sep='')
+            print('Exception was', e)
+        except FileNotFoundError as e:
+            print(cmd)
+            print(e)
+        
+    def calc_output_path(self):
+        self.output_path = os.path.join(
+            self.output_root,
+            os.path.splitext(
+                os.path.split(self.input_path)[1])[0] +
+                '.' + self.codec + 
+                '.' + self.output_res.split('x')[1] +
+                '.mkv'
+        )
 
 
 # -- Functions -- #
-def usage():
-    print()
-    print(os.path.split(sys.argv[0])[1], 'full\\path\\to\\input.file')
-    print('  Use NVEnc to generate an HEVC-encoded file in', __OUTPUT_ROOT)
-    print('\n-- Default NVEnc Options (1080p:')
-    print('  ' + '\n  '.join(__NVENC_OPTS_1080 + __NVENC_OPTS_COMMON))
-    print()
-    return
-
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Use NVEnc to generate two files (HEVC@1080p, h264@720p)'
+        description='Use NVEnc to generate two files (hevc@1080p, h264@720p)'
     )
     parser.add_argument(
         'input_file',
-        help='source file to re-encode',
+        help='Required; source file to re-encode',
         type=str
     )
     parser.add_argument(
         '-nvenc',
         nargs=1,
         metavar='nvenc.exe',
-        default=[__NVENC_PATH],
+        default=[r"C:\tools\nvenc\NVEncC64.exe"],
         help='full path to NVEncC64.exe',
         type=str
     )
@@ -57,109 +89,79 @@ def parse_args():
         '-o',
         nargs=1,
         metavar='output_root',
-        default=[__OUTPUT_ROOT], 
+        default=[r"D:\BD\conv"], 
         help='directory to write the new files',
         type=str
     )
     parser.add_argument(
-        '-cqp', '-q',
+        '-cqp',
         nargs=1,
-        metavar='quality_int',
+        metavar='quality',
         default=['22'], 
-        help='constant quality setting',
+        help='constant quality setting (lower is better)',
         type=str
     )
     parser.add_argument(
-        '-only1080', '-1080',
+        '--overwrite',
         default=False, 
-        help='only output the hevc@1080p version',
+        help='clobber the output file if it already exists',
         action="store_true"
     )
     parser.add_argument(
-        '-only720', '-720',
-        default=False, 
-        help='only output the h264@720p version',
-        action="store_true"
-    )
-    parser.add_argument(
-        '-overwrite', '-ovr',
-        default=False, 
-        help='write the output file even if it already exists',
-        action="store_true"
+        '-render',
+        default=None,
+        metavar=('codec', 'WxH'),
+        help='Multi; custom render job e.g. "h264 1280x720"',
+        action='append',
+        nargs=2,
+        type=str,
     )
 
     args = parser.parse_args()
-    if args.nvenc:
-        globals().update({ '__NVENC_PATH': args.nvenc[0] })
-        print(' -- Using NVEnc:', __NVENC_PATH)
-    if args.o:
-        globals().update({ '__OUTPUT_ROOT': args.o[0] })
-        print(' -- Using Output Root:', __OUTPUT_ROOT)
-    if args.cqp:
-        globals().update({ '__NVENV_OPTS_CQP': ['--cqp', args.cqp[0]] })
-        print(' -- Using Quality:', __NVENV_OPTS_CQP[1])
-    if args.only1080:
-        print(' -- Only rendering hevc@1080p')
-    if args.only720:
-        print(' -- Only rendering h264@720p')
-    if args.overwrite:
-        print(' -- Will overwrite output files')
-    
-    return args
-    
-
-def encode_me(
-        input_path, 
-        res="1080",
-        nvenc_path=__NVENC_PATH,
-        nvenc_opts_1080=__NVENC_OPTS_1080,
-        nvenc_opts_720=__NVENC_OPTS_720,
-        nvenc_opts_cqp=__NVENV_OPTS_CQP,
-        nvenc_opts_common=__NVENC_OPTS_COMMON,
-        output_root=__OUTPUT_ROOT
-    ):
-
-    if res == '1080':
-        options = nvenc_opts_1080 + nvenc_opts_cqp + nvenc_opts_common
-    elif res == '720':
-        options = nvenc_opts_720 + nvenc_opts_cqp + nvenc_opts_common
-    else:
-        print('Unknown Resolution passed:', res)
-        return
-
-    try:
-        output_path = os.path.join(
-            output_root,
-            os.path.splitext(os.path.split(input_path)[1])[0] + '.' + res + '.mkv'
-        )
-
-        print('\n--- Encoding', input_path, '-->', output_path)
-        if os.path.exists and not args.overwrite:
-            print('  - The file already exists, skipping render')
-            return
-
-        cmd = [nvenc_path] + options[:] + [
-            '-i', input_path,
-            '-o', output_path
+    if not args.render:
+        args.render = [    
+            ['hevc', '1920x1080'],
+            ['h264', '1280x720']
         ]
-        check_call(cmd)
-    except CalledProcessError as e:
-        print('Failed to encode', input_path)
-        print('Command used: {{', cmd, '}}', sep='')
-        print('Exception was', e)
-    except FileNotFoundError as e:
-        print(cmd)
-        print(e)
+    pretty_print_options(args)    
+    return args
+
+
+def pretty_print_single(label, value):
+    print(' -- {:<12}  :  {}'.format(label, value))
     return
 
 
+def pretty_print_pair(label, value1, value2):
+    if label == '':
+        print('    {:<12}  :  {}@{}'.format(label, value1, value2))
+    else:
+        print(' -- {:<12}  :  {}@{}'.format(label, value1, value2))
+    return
+
+
+def pretty_print_options(args):
+    pretty_print_single('NVEnc', args.nvenc[0])
+    pretty_print_single('Output Root', args.o[0])
+    pretty_print_single('Quality', args.cqp[0])
+    pretty_print_pair('Rendering', args.render[0][0], args.render[0][1])
+    if len(args.render) > 1:
+        for job in args.render[1:]:
+            pretty_print_pair('', job[0], job[1])
+    pretty_print_single('Overwrite', args.overwrite)
+    return
+
 def main(args):
-    if not args.only720:
-        encode_me(args.input_file, res='1080')
-
-    if not args.only1080:
-        encode_me(args.input_file, res='720')
-
+    for job in args.render:
+        this_job = RenderJob(
+            args.input_file,
+            output_root=args.o[0],
+            encoder_path=args.nvenc[0],
+            cqp=args.cqp[0],
+            output_res=job[1],
+            codec=job[0]
+        )
+        this_job.render()
     return
 
 
